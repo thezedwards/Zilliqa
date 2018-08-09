@@ -44,14 +44,18 @@ bool DirectoryService::ViewChangeValidator(
 
     m_pendingVCBlock.reset(new VCBlock(vcBlock, 0));
 
-    if (m_mediator.m_DSCommittee->at(m_viewChangeCounter).second
+    const uint16_t candidateLeaderIndex
+        = (m_consensusLeaderID + m_viewChangeCounter)
+        % m_mediator.m_DSCommittee->size();
+
+    if (m_mediator.m_DSCommittee->at(candidateLeaderIndex).second
         != m_pendingVCBlock->GetHeader().GetCandidateLeaderNetworkInfo())
     {
         LOG_GENERAL(WARNING, "Candidate network info mismatched");
         return false;
     }
 
-    if (!(m_mediator.m_DSCommittee->at(m_viewChangeCounter).first
+    if (!(m_mediator.m_DSCommittee->at(candidateLeaderIndex).first
           == m_pendingVCBlock->GetHeader().GetCandidateLeaderPubKey()))
     {
         LOG_GENERAL(WARNING, "Candidate pubkey mismatched");
@@ -126,13 +130,15 @@ void DirectoryService::RunConsensusOnViewChange()
     SetLastKnownGoodState();
     SetState(VIEWCHANGE_CONSENSUS_PREP);
 
-    m_viewChangeCounter = (m_viewChangeCounter + 1)
-        % m_mediator.m_DSCommittee
-              ->size(); // TODO: To be change to a random node using VRF
+    m_viewChangeCounter++;
+
+    const uint16_t candidateLeaderIndex
+        = (m_consensusLeaderID + m_viewChangeCounter)
+        % m_mediator.m_DSCommittee->size();
 
     LOG_GENERAL(INFO,
                 "The new consensus leader is at index "
-                    << to_string(m_viewChangeCounter));
+                    << to_string(candidateLeaderIndex));
 
     for (unsigned i = 0; i < m_mediator.m_DSCommittee->size(); i++)
     {
@@ -143,7 +149,7 @@ void DirectoryService::RunConsensusOnViewChange()
     bool ConsensusObjCreation = true;
 
     // We compare with empty peer is due to the fact that DSCommittee for yourself is 0.0.0.0 with port 0.
-    if (m_mediator.m_DSCommittee->at(m_viewChangeCounter).second == Peer())
+    if (m_mediator.m_DSCommittee->at(candidateLeaderIndex).second == Peer())
     {
         ConsensusObjCreation = RunConsensusOnViewChangeWhenCandidateLeader();
         if (!ConsensusObjCreation)
@@ -198,8 +204,12 @@ void DirectoryService::ComputeNewCandidateLeader()
                 "Composing new vc block with vc count at "
                     << m_viewChangeCounter);
 
+    const uint16_t candidateLeaderIndex
+        = (m_consensusLeaderID + m_viewChangeCounter)
+        % m_mediator.m_DSCommittee->size();
+
     Peer newLeaderNetworkInfo;
-    if (m_mediator.m_DSCommittee->at(m_viewChangeCounter).second == Peer())
+    if (m_mediator.m_DSCommittee->at(candidateLeaderIndex).second == Peer())
     {
         // I am the leader but in the Peer store, it is put as 0.0.0.0 with port 0
         newLeaderNetworkInfo = m_mediator.m_selfPeer;
@@ -207,7 +217,7 @@ void DirectoryService::ComputeNewCandidateLeader()
     else
     {
         newLeaderNetworkInfo
-            = m_mediator.m_DSCommittee->at(m_viewChangeCounter).second;
+            = m_mediator.m_DSCommittee->at(candidateLeaderIndex).second;
     }
 
     {
@@ -220,8 +230,8 @@ void DirectoryService::ComputeNewCandidateLeader()
                         .GetBlockNum()
                     + 1,
                 m_mediator.m_currentEpochNum, m_viewChangestate,
-                m_viewChangeCounter, newLeaderNetworkInfo,
-                m_mediator.m_DSCommittee->at(m_viewChangeCounter).first,
+                candidateLeaderIndex, newLeaderNetworkInfo,
+                m_mediator.m_DSCommittee->at(candidateLeaderIndex).first,
                 m_viewChangeCounter, get_time_as_int()),
             CoSignatures()));
     }

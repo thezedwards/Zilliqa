@@ -374,6 +374,21 @@ void DirectoryService::ProcessFinalBlockConsensusWhenDone()
     auto func = [this]() mutable -> void {
         LOG_EPOCH(INFO, to_string(m_mediator.m_currentEpochNum).c_str(),
                   "START OF a new EPOCH");
+
+        // Next DS leader will be hash of previous Tx block modulo number of DS nodes
+        // If a new DS epoch is coming, this leader will handle PoW/DS Block consensus
+        // If another Tx epoch is coming, this leader will handle Final Block consensus
+        const uint8_t* hash = m_mediator.m_txBlockChain.GetLastBlock()
+                                  .GetHeader()
+                                  .GetPrevHash()
+                                  .data();
+        const unsigned int hash_len = m_mediator.m_txBlockChain.GetLastBlock()
+                                          .GetHeader()
+                                          .GetPrevHash()
+                                          .size;
+        uint16_t tmp = (hash[hash_len - 2] << 8) + hash[hash_len - 1];
+        m_consensusLeaderID = tmp % m_mediator.m_DSCommittee->size();
+
         if (m_mediator.m_currentEpochNum % NUM_FINAL_BLOCK_PER_POW == 0)
         {
             LOG_EPOCH(INFO, to_string(m_mediator.m_currentEpochNum).c_str(),

@@ -172,8 +172,7 @@ class DirectoryService : public Executable, public Broadcastable
                                         unsigned int& my_shards_hi) const;
     void SendDSBlockToShardNodes(unsigned int my_shards_lo,
                                  unsigned int my_shards_hi);
-    void UpdateMyDSModeAndConsensusId();
-    void UpdateDSCommiteeComposition(const Peer& winnerpeer); //TODO: Refactor
+    void UpdateDSCommitteeComposition(const Peer& winnerpeer); //TODO: Refactor
 
     void ProcessDSBlockConsensusWhenDone(const vector<unsigned char>& message,
                                          unsigned int offset);

@@ -170,8 +170,12 @@ void DirectoryService::ProcessViewChangeConsensusWhenDone()
 
     // StoreVCBlockToStorage(); TODO
 
+    const uint16_t candidateLeaderIndex
+        = (m_consensusLeaderID + m_viewChangeCounter)
+        % m_mediator.m_DSCommittee->size();
+
     Peer expectedLeader;
-    if (m_mediator.m_DSCommittee->at(m_viewChangeCounter).second == Peer())
+    if (m_mediator.m_DSCommittee->at(candidateLeaderIndex).second == Peer())
     {
         // I am 0.0.0.0
         expectedLeader = m_mediator.m_selfPeer;
@@ -179,7 +183,7 @@ void DirectoryService::ProcessViewChangeConsensusWhenDone()
     else
     {
         expectedLeader
-            = m_mediator.m_DSCommittee->at(m_viewChangeCounter).second;
+            = m_mediator.m_DSCommittee->at(candidateLeaderIndex).second;
     }
 
     if (expectedLeader == newLeaderNetworkInfo)
@@ -217,22 +221,26 @@ void DirectoryService::ProcessViewChangeConsensusWhenDone()
         {
             lock_guard<mutex> g2(m_mediator.m_mutexDSCommittee);
 
-            for (unsigned int faultyLeaderIndex = 0;
-                 faultyLeaderIndex < m_viewChangeCounter; faultyLeaderIndex++)
+            for (unsigned int i = 0; i < m_viewChangeCounter; i++)
             {
-                LOG_GENERAL(INFO,
-                            "Ejecting "
-                                << m_mediator.m_DSCommittee->front().second);
+                uint16_t faultyLeaderIndex = (m_consensusLeaderID + i)
+                    % m_mediator.m_DSCommittee->size();
 
-                // Adjust ds commiteee
+                LOG_GENERAL(INFO,
+                            "Ejecting " << m_mediator.m_DSCommittee
+                                               ->at(faultyLeaderIndex)
+                                               .second);
+
+                // Adjust ds committee
                 m_mediator.m_DSCommittee->push_back(
-                    m_mediator.m_DSCommittee->front());
-                m_mediator.m_DSCommittee->pop_front();
+                    m_mediator.m_DSCommittee->at(faultyLeaderIndex));
+                m_mediator.m_DSCommittee->erase(
+                    m_mediator.m_DSCommittee->begin() + faultyLeaderIndex);
 
                 // Adjust faulty DS leader and/or faulty ds candidate leader
                 if (m_consensusMyID == faultyLeaderIndex)
                 {
-                    if (m_consensusMyID == 0)
+                    if (m_consensusMyID == m_consensusLeaderID)
                     {
                         LOG_EPOCH(
                             INFO,

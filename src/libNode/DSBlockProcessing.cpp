@@ -80,14 +80,14 @@ void Node::StoreDSBlockToDisk(const DSBlock& dsblock)
 #endif
 }
 
-void Node::UpdateDSCommiteeComposition(const Peer& winnerpeer)
+void Node::UpdateDSCommitteeComposition(const Peer& winnerpeer)
 {
     LOG_MARKER();
 
     // Update my view of the DS committee
-    // 1. Insert new leader at the head of the queue
-    // 2. Pop out the oldest backup from the tail of the queue
-    // Note: If I am the primary, push a placeholder with ip=0 and port=0 in place of my real port
+    // 1. Insert new member at the head of the queue
+    // 2. Pop out the oldest member from the tail of the queue
+    // Note: If I am the new member, push a placeholder with ip=0 and port=0 in place of my real port
     Peer peer;
 
     if (!(m_mediator.m_selfKey.second
@@ -102,6 +102,20 @@ void Node::UpdateDSCommiteeComposition(const Peer& winnerpeer)
         m_mediator.m_dsBlockChain.GetLastBlock().GetHeader().GetMinerPubKey(),
         peer));
     m_mediator.m_DSCommittee->pop_back();
+
+    // Next DS leader will be hash of previous Tx block modulo number of DS nodes
+    // This leader will handle Final Block consensus
+    const uint8_t* hash = m_mediator.m_txBlockChain.GetLastBlock()
+                              .GetHeader()
+                              .GetPrevHash()
+                              .data();
+    const unsigned int hash_len = m_mediator.m_txBlockChain.GetLastBlock()
+                                      .GetHeader()
+                                      .GetPrevHash()
+                                      .size;
+    uint16_t tmp = (hash[hash_len - 2] << 8) + hash[hash_len - 1];
+    m_mediator.m_ds->m_consensusLeaderID
+        = tmp % m_mediator.m_DSCommittee->size();
 }
 
 bool Node::CheckWhetherDSBlockNumIsLatest(const uint64_t dsblockNum)
@@ -538,20 +552,20 @@ bool Node::ProcessDSBlock(const vector<unsigned char>& message,
 #endif // IS_LOOKUP_NODE
 
     m_mediator.UpdateDSBlockRand(); // Update the rand1 value for next PoW
-    UpdateDSCommiteeComposition(newleaderIP);
+    UpdateDSCommitteeComposition(newleaderIP);
 
 #ifndef IS_LOOKUP_NODE
 
     POW::GetInstance().StopMining();
 
-    // If I am the next DS leader -> need to set myself up as a DS node
+    // If I won PoW -> need to set myself up as a DS node
     if (m_mediator.m_selfKey.second
         == m_mediator.m_dsBlockChain.GetLastBlock()
                .GetHeader()
                .GetMinerPubKey())
     {
         LOG_EPOCH(INFO, to_string(m_mediator.m_currentEpochNum).c_str(),
-                  "I won PoW :-) I am now the new DS committee leader!");
+                  "I won PoW :-) I am now a DS node!");
 
         // [Sharding structure] -> Use the loading function for DS node
         cur_offset
@@ -564,18 +578,39 @@ bool Node::ProcessDSBlock(const vector<unsigned char>& message,
         m_mediator.m_ds->m_consensusMyID = 0;
         m_mediator.m_ds->m_consensusID
             = m_mediator.m_currentEpochNum == 1 ? 1 : 0;
-        m_mediator.m_ds->m_mode = DirectoryService::Mode::PRIMARY_DS;
 
         // (We're getting rid of this eventually) Clean up my txn list since I'm a DS node now
         m_mediator.m_node->CleanCreatedTransaction();
 
-        LOG_EPOCHINFO(to_string(m_mediator.m_currentEpochNum).c_str(),
-                      DS_LEADER_MSG);
-        LOG_STATE("[IDENT][" << std::setw(15) << std::left
-                             << m_mediator.m_selfPeer.GetPrintableIPAddress()
-                             << "][0     ] DSLD");
+        if (m_mediator.m_ds->m_consensusLeaderID
+            == m_mediator.m_ds->m_consensusMyID)
+        {
+            LOG_EPOCH(INFO, to_string(m_mediator.m_currentEpochNum).c_str(),
+                      "I am the new DS leader");
+            LOG_EPOCHINFO(to_string(m_mediator.m_currentEpochNum).c_str(),
+                          DS_LEADER_MSG);
+            LOG_STATE("[IDENT]["
+                      << std::setw(15) << std::left
+                      << m_mediator.m_selfPeer.GetPrintableIPAddress()
+                      << "][0     ] DSLD");
 
-        // Finally, start as the DS leader
+            m_mediator.m_ds->m_mode = DirectoryService::Mode::PRIMARY_DS;
+        }
+        else
+        {
+            LOG_EPOCH(INFO, to_string(m_mediator.m_currentEpochNum).c_str(),
+                      "I am just a backup DS");
+            LOG_EPOCHINFO(to_string(m_mediator.m_currentEpochNum).c_str(),
+                          DS_BACKUP_MSG);
+            LOG_STATE("[IDENT]["
+                      << setw(15) << left
+                      << m_mediator.m_selfPeer.GetPrintableIPAddress() << "]["
+                      << setw(6) << left << m_consensusMyID << "] DSBK");
+
+            m_mediator.m_ds->m_mode = DirectoryService::Mode::BACKUP_DS;
+        }
+
+        // Finally, start as a DS node
         m_mediator.m_ds->StartFirstTxEpoch();
     }
     // If I am a shard node

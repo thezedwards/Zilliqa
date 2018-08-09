@@ -210,29 +210,29 @@ void DirectoryService::SendDSBlockToShardNodes(unsigned int my_shards_lo,
     }
 }
 
-void DirectoryService::UpdateMyDSModeAndConsensusId()
+void DirectoryService::UpdateDSCommitteeComposition(const Peer& winnerpeer)
 {
-    // If I was DS primary, now I will only be DS backup
-    if (m_mode == PRIMARY_DS)
-    {
-        LOG_EPOCH(INFO, to_string(m_mediator.m_currentEpochNum).c_str(),
-                  "I am now just a backup DS");
-        LOG_EPOCHINFO(to_string(m_mediator.m_currentEpochNum).c_str(),
-                      DS_BACKUP_MSG);
-        m_mode = BACKUP_DS;
-        m_consensusMyID++;
+    // Update the DS committee composition
+    LOG_MARKER();
 
-        LOG_STATE("[IDENT][" << setw(15) << left
-                             << m_mediator.m_selfPeer.GetPrintableIPAddress()
-                             << "][" << setw(6) << left << m_consensusMyID
-                             << "] DSBK");
-    }
-    // Check if I am the oldest backup DS (I will no longer be part of the DS committee)
-    else if ((uint32_t)(m_consensusMyID + 1)
-             == m_mediator.m_DSCommittee->size())
+    // Next DS leader will be hash of previous Tx block modulo number of DS nodes
+    // This leader will handle Final Block consensus
+    const uint8_t* hash = m_mediator.m_txBlockChain.GetLastBlock()
+                              .GetHeader()
+                              .GetPrevHash()
+                              .data();
+    const unsigned int hash_len = m_mediator.m_txBlockChain.GetLastBlock()
+                                      .GetHeader()
+                                      .GetPrevHash()
+                                      .size;
+    uint16_t tmp = (hash[hash_len - 2] << 8) + hash[hash_len - 1];
+    m_consensusLeaderID = tmp % m_mediator.m_DSCommittee->size();
+
+    // If I am the oldest member DS I will no longer be part of the DS committee
+    if ((uint32_t)(m_consensusMyID + 1) == m_mediator.m_DSCommittee->size())
     {
         LOG_EPOCH(INFO, to_string(m_mediator.m_currentEpochNum).c_str(),
-                  "I am the oldest backup DS -> I am now just a shard node"
+                  "I am the oldest member DS -> I am now just a shard node"
                       << "\n"
                       << DS_KICKOUT_MSG);
         m_mode = IDLE;
@@ -241,29 +241,44 @@ void DirectoryService::UpdateMyDSModeAndConsensusId()
                              << m_mediator.m_selfPeer.GetPrintableIPAddress()
                              << "][      ] IDLE");
     }
-    // Other DS nodes continue to remain DS backups
     else
     {
         m_consensusMyID++;
 
-        LOG_STATE("[IDENT][" << setw(15) << left
-                             << m_mediator.m_selfPeer.GetPrintableIPAddress()
-                             << "][" << setw(6) << left << m_consensusMyID
-                             << "] DSBK");
-    }
-}
+        if (m_consensusLeaderID == m_consensusMyID)
+        {
+            LOG_EPOCH(INFO, to_string(m_mediator.m_currentEpochNum).c_str(),
+                      "I am the new DS leader");
+            LOG_EPOCHINFO(to_string(m_mediator.m_currentEpochNum).c_str(),
+                          DS_LEADER_MSG);
+            LOG_STATE("[IDENT]["
+                      << std::setw(15) << std::left
+                      << m_mediator.m_selfPeer.GetPrintableIPAddress()
+                      << "][0     ] DSLD");
 
-void DirectoryService::UpdateDSCommiteeComposition(const Peer& winnerpeer)
-{
-    // Update the DS committee composition
-    LOG_MARKER();
+            m_mode = PRIMARY_DS;
+        }
+        else
+        {
+            LOG_EPOCH(INFO, to_string(m_mediator.m_currentEpochNum).c_str(),
+                      "I am just a backup DS");
+            LOG_EPOCHINFO(to_string(m_mediator.m_currentEpochNum).c_str(),
+                          DS_BACKUP_MSG);
+            LOG_STATE("[IDENT]["
+                      << setw(15) << left
+                      << m_mediator.m_selfPeer.GetPrintableIPAddress() << "]["
+                      << setw(6) << left << m_consensusMyID << "] DSBK");
+
+            m_mode = BACKUP_DS;
+        }
+    }
 
     m_mediator.m_DSCommittee->emplace_front(make_pair(
         m_mediator.m_dsBlockChain.GetLastBlock().GetHeader().GetMinerPubKey(),
         winnerpeer));
     m_mediator.m_DSCommittee->pop_back();
 
-    // Remove the new winner of pow from m_allpowconn. He is the new ds leader and do not need to do pow anymore
+    // Remove the new winner of pow from m_allpowconn
     m_allPoWConns.erase(
         m_mediator.m_dsBlockChain.GetLastBlock().GetHeader().GetMinerPubKey());
 }
@@ -476,9 +491,7 @@ void DirectoryService::ProcessDSBlockConsensusWhenDone(
             + 1
         << "] AFTER SENDING DSBLOCK");
 
-    UpdateMyDSModeAndConsensusId();
-
-    UpdateDSCommiteeComposition(winnerpeer);
+    UpdateDSCommitteeComposition(winnerpeer);
 
     StartFirstTxEpoch();
 }
