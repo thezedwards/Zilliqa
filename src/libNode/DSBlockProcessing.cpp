@@ -116,6 +116,14 @@ void Node::UpdateDSCommitteeComposition(const Peer& winnerpeer)
     uint16_t tmp = (hash[hash_len - 2] << 8) + hash[hash_len - 1];
     m_mediator.m_ds->m_consensusLeaderID
         = tmp % m_mediator.m_DSCommittee->size();
+
+    LOG_EPOCH(INFO, to_string(m_mediator.m_currentEpochNum).c_str(),
+              "The new DS leader is at index "
+                  << m_mediator.m_ds->m_consensusLeaderID << " with PubKey "
+                  << m_mediator.m_DSCommittee->at(m_consensusLeaderID).first
+                  << " and IP "
+                  << m_mediator.m_DSCommittee->at(m_consensusLeaderID)
+                         .second.GetPrintableIPAddress());
 }
 
 bool Node::CheckWhetherDSBlockNumIsLatest(const uint64_t dsblockNum)

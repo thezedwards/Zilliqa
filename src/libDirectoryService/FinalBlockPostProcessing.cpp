@@ -389,6 +389,41 @@ void DirectoryService::ProcessFinalBlockConsensusWhenDone()
         uint16_t tmp = (hash[hash_len - 2] << 8) + hash[hash_len - 1];
         m_consensusLeaderID = tmp % m_mediator.m_DSCommittee->size();
 
+        LOG_EPOCH(INFO, to_string(m_mediator.m_currentEpochNum).c_str(),
+                  "The new DS leader is at index "
+                      << m_consensusLeaderID << " with PubKey "
+                      << m_mediator.m_DSCommittee->at(m_consensusLeaderID).first
+                      << " and IP "
+                      << m_mediator.m_DSCommittee->at(m_consensusLeaderID)
+                             .second.GetPrintableIPAddress());
+
+        if (m_consensusLeaderID == m_consensusMyID)
+        {
+            LOG_EPOCH(INFO, to_string(m_mediator.m_currentEpochNum).c_str(),
+                      "I am the new DS leader");
+            LOG_EPOCHINFO(to_string(m_mediator.m_currentEpochNum).c_str(),
+                          DS_LEADER_MSG);
+            LOG_STATE("[IDENT]["
+                      << std::setw(15) << std::left
+                      << m_mediator.m_selfPeer.GetPrintableIPAddress()
+                      << "][0     ] DSLD");
+
+            m_mode = PRIMARY_DS;
+        }
+        else
+        {
+            LOG_EPOCH(INFO, to_string(m_mediator.m_currentEpochNum).c_str(),
+                      "I am just a backup DS");
+            LOG_EPOCHINFO(to_string(m_mediator.m_currentEpochNum).c_str(),
+                          DS_BACKUP_MSG);
+            LOG_STATE("[IDENT]["
+                      << setw(15) << left
+                      << m_mediator.m_selfPeer.GetPrintableIPAddress() << "]["
+                      << setw(6) << left << m_consensusMyID << "] DSBK");
+
+            m_mode = BACKUP_DS;
+        }
+
         if (m_mediator.m_currentEpochNum % NUM_FINAL_BLOCK_PER_POW == 0)
         {
             LOG_EPOCH(INFO, to_string(m_mediator.m_currentEpochNum).c_str(),
