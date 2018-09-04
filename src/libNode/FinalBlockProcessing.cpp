@@ -657,9 +657,9 @@ void Node::LogReceivedFinalBlockDetails([[gnu::unused]] const TxBlock& txblock)
 #ifdef IS_LOOKUP_NODE
     LOG_EPOCH(INFO, to_string(m_mediator.m_currentEpochNum).c_str(),
               "I the lookup node have deserialized the TxBlock");
-    LOG_EPOCH(
-        INFO, to_string(m_mediator.m_currentEpochNum).c_str(),
-        "txblock.GetHeader().GetType(): " << txblock.GetHeader().GetType());
+    LOG_EPOCH(INFO, to_string(m_mediator.m_currentEpochNum).c_str(),
+              "txblock.GetHeader().GetType(): "
+                  << to_string(txblock.GetHeader().GetType()));
     LOG_EPOCH(INFO, to_string(m_mediator.m_currentEpochNum).c_str(),
               "txblock.GetHeader().GetVersion(): "
                   << txblock.GetHeader().GetVersion());
