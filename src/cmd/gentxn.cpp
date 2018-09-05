@@ -28,7 +28,6 @@
 
 void GenTxn(unsigned int k, const Address& fromAddr, unsigned int iteration)
 {
-
     vector<unsigned char> txns;
     unsigned j = 0;
     for (auto& privKeyHexStr : GENESIS_KEYS)
@@ -63,7 +62,7 @@ void GenTxn(unsigned int k, const Address& fromAddr, unsigned int iteration)
             Transaction txn(0, nonce + i + 1, receiverAddr,
                             make_pair(privKey, pubKey), 10 * i + 2, 1, 1, {},
                             {});
-            /*txns.emplace_back(txn);*/
+
             txn.Serialize(txns, 0);
             for (auto& i : txns)
             {
@@ -79,13 +78,13 @@ void GenTxn(unsigned int k, const Address& fromAddr, unsigned int iteration)
 
 int main()
 {
-
     Address toAddr;
 
     for (unsigned int i = 0; i < toAddr.asArray().size(); i++)
     {
         toAddr.asArray().at(i) = i + 4;
     }
+
     for (unsigned int i = 0; i < 10000; i++)
     {
         GenTxn(NUM_TXN, toAddr, i);
