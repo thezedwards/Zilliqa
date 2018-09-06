@@ -18,75 +18,146 @@
 #include "libCrypto/Sha2.h"
 #include "libData/AccountData/Account.h"
 #include "libData/AccountData/Address.h"
-#include "libUtils/GetTxnFromFile.h"
+#include "libData/AccountData/Transaction.h"
 #include "libUtils/Logger.h"
-#include "libValidator/Validator.h"
-#include <array>
+#include <boost/filesystem.hpp>
+#include <climits>
 #include <fstream>
 #include <string>
 #include <vector>
 
-void GenTxn(unsigned int k, const Address& fromAddr, unsigned int iteration)
+using KeyPairAddress = std::tuple<PrivKey, PubKey, Address>;
+using NonceRange = std::tuple<std::size_t, std::size_t>;
+
+std::vector<KeyPairAddress> get_genesis_keypair_and_address()
 {
-    vector<unsigned char> txns;
-    unsigned j = 0;
+    std::vector<KeyPairAddress> result;
+
     for (auto& privKeyHexStr : GENESIS_KEYS)
     {
-        fstream file;
-
         auto privKeyBytes{DataConversion::HexStrToUint8Vec(privKeyHexStr)};
         auto privKey = PrivKey{privKeyBytes, 0};
         auto pubKey = PubKey{privKey};
         auto address = Account::GetAddressFromPublicKey(pubKey);
-        auto nonce = iteration * NUM_TXN;
 
-        file.open(TXN_PATH + "/" + address.hex() + "_" + to_string(nonce)
-                      + ".zil",
-                  ios ::app | ios::binary);
+        result.push_back(
+            std::tuple<PrivKey, PubKey, Address>(privKey, pubKey, address));
+    }
 
-        if (!file.is_open())
-        {
-            cout << "Unable to open file" << endl;
-            continue;
-        }
+    return result;
+}
 
-        size_t n = k;
-        txns.clear();
+void gen_txn_file(const std::string& prefix, const KeyPairAddress& from,
+                  const Address& toAddr, const NonceRange& nonce_range)
+{
+    const auto& privKey = std::get<0>(from);
+    const auto& pubKey = std::get<1>(from);
+    const auto& address = std::get<2>(from);
 
-        Address receiverAddr = fromAddr;
-        //unsigned int curr_offset = 0;
-        txns.reserve(n);
-        for (auto i = 0u; i != n; i++)
-        {
+    const auto& begin = std::get<0>(nonce_range);
+    const auto& end = std::get<1>(nonce_range);
 
-            Transaction txn(0, nonce + i + 1, receiverAddr,
-                            make_pair(privKey, pubKey), 10 * i + 2, 1, 1, {},
-                            {});
+    std::ostringstream oss;
+    oss << prefix << "/" << address.hex() << "_" << begin << ".zil";
+    // TODO: use address_being_end.zil as the following
+    // oss << prefix << "/" << address.hex() << "_" << begin << "_" << end << ".zil";
 
-            txn.Serialize(txns, 0);
-            for (auto& i : txns)
-            {
-                file << i;
-            }
-        }
+    std::string txn_filename(oss.str());
+    ofstream txn_file(txn_filename, std::fstream::binary);
 
-        file.close();
-        cout << "Iteration " << j << endl;
-        j++;
+    std::vector<unsigned char> buf;
+
+    for (auto nonce = begin; nonce < end; nonce++)
+    {
+
+        Transaction txn{0, nonce, toAddr, make_pair(privKey, pubKey), nonce, 1,
+                        1, {},    {}};
+
+        txn.Serialize(buf, 0);
+        txn_file.write(reinterpret_cast<char*>(buf.data()), buf.size());
+    }
+
+    if (txn_file)
+    {
+        std::cout << "Write to file " << txn_filename << "\n";
+    }
+    else
+    {
+        std::cerr << "Error writing to file " << txn_filename << "\n";
     }
 }
 
-int main()
+void usage(const std::string& prog)
 {
-    Address toAddr;
+    cout << "Usage: " << prog << " [BEGIN [END]]\n";
+    cout << "\n";
+    cout << "Description:\n";
+    cout << "\tGenerate transactions starting from batch BEGIN (default to 0) "
+            "to batch END (default to START+10000)\n";
+    cout << "\tTransaction are generated from genesis accounts (constants.xml) "
+            "to one random wallet\n";
+    cout << "\tThe batch size is decided by NUM_TXN_TO_SEND_PER_ACCOUNT "
+            "(constants.xml)\n";
+}
 
-    for (unsigned int i = 0; i < toAddr.asArray().size(); i++)
+int main(int argc, char** argv)
+{
+    string prog(argv[0]);
+
+    const unsigned long delta = 10000;
+    unsigned long begin = 0, end = delta;
+
+    if (argc > 1)
     {
-        toAddr.asArray().at(i) = i + 4;
+        begin = strtoul(argv[1], nullptr, 10);
+        if (begin != ULONG_MAX)
+        {
+            end = begin + delta;
+        }
     }
 
-    for (unsigned int i = 0; i < 10000; i++)
+    if (argc > 2)
     {
-        GenTxn(NUM_TXN, toAddr, i);
+        end = strtoul(argv[2], nullptr, 10);
+    }
+
+    if (begin == ULONG_MAX || end == ULONG_MAX || begin > end)
+    {
+        usage(prog);
+        return 1;
+    }
+
+    auto receiver = Schnorr::GetInstance().GenKeyPair();
+    auto toAddr = Account::GetAddressFromPublicKey(receiver.second);
+
+    std::string txn_path{TXN_PATH};
+    if (!boost::filesystem::exists(txn_path))
+    {
+        std::cerr << "Cannot find path '" << txn_path
+                  << "', check TXN_PATH in constants.xml\n";
+        return 1;
+    }
+
+    auto batch_size = NUM_TXN_TO_SEND_PER_ACCOUNT;
+
+    auto fromAccounts = get_genesis_keypair_and_address();
+
+    std::cout << "Number of genesis accounts: " << fromAccounts.size() << "\n";
+    std::cout << "Begin batch: " << begin << "\n";
+    std::cout << "End batch: " << end << "\n";
+    std::cout << "Destionation directory (TXN_PATH): " << txn_path << "\n";
+    std::cout << "Batch size (NUM_TXN_TO_SEND_PER_ACCOUNT): " << batch_size
+              << "\n";
+
+    for (auto batch = begin; batch < end; batch++)
+    {
+        auto begin_nonce = batch * batch_size;
+        auto end_nonce = (batch + 1) * batch_size;
+        auto nonce_range = std::make_tuple(begin_nonce, end_nonce);
+
+        for (auto& from : fromAccounts)
+        {
+            gen_txn_file(txn_path, from, toAddr, nonce_range);
+        }
     }
 }
